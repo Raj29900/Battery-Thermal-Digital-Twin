@@ -1,0 +1,1399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Battery Thermal Digital Twin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --g-950:#0a0d12; --g-900:#11151b; --g-850:#161c24; --g-800:#1b222c; --g-750:#212a35;
+    --line:#262f3b; --line-soft:#1a212a;
+
+    --ion:#4fd1ff;        /* coolant / cold accent */
+    --ion-dim:#1c5570;
+    --ember:#ff8a4c;      /* heat / energy accent */
+    --ember-dim:#7a3d1c;
+    --mint:#46d19a;       /* nominal / ok */
+    --amber:#f5b342;      /* warning */
+    --crit:#ff4f64;       /* critical */
+
+    --t-100:#eef2f7; --t-300:#c3ccd8; --t-500:#8b96a5; --t-700:#57626f; --t-900:#333c48;
+
+    --font-d:'Space Grotesk', system-ui, sans-serif;
+    --font-m:'JetBrains Mono', Consolas, monospace;
+
+    --ease: cubic-bezier(.22,.85,.32,1);
+  }
+
+  *{ box-sizing:border-box; }
+  html{ scroll-behavior:smooth; height:100%; }
+  body{
+    margin:0; padding:0; height:100%; color:var(--t-100);
+    font-family:var(--font-m);
+    background:
+      radial-gradient(1100px 600px at 15% -10%, rgba(79,209,255,0.06), transparent 60%),
+      radial-gradient(900px 500px at 100% 10%, rgba(255,138,76,0.05), transparent 55%),
+      var(--g-950);
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  ::selection{ background:rgba(79,209,255,0.25); }
+  *:focus-visible{ outline:2px solid var(--ion); outline-offset:2px; }
+
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
+  }
+
+  .shell{ max-width:1440px; margin:0 auto; padding:20px 22px 70px; }
+
+  /* ---------------- header ---------------- */
+  header.top{
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    padding:6px 2px 18px; flex-wrap:wrap;
+  }
+  .brand{ display:flex; align-items:center; gap:12px; }
+  .brand .mark{
+    width:36px; height:36px; border-radius:9px; position:relative; flex:none;
+    background:linear-gradient(135deg, var(--ember), var(--ion));
+    box-shadow:0 0 22px rgba(79,209,255,0.25);
+  }
+  .brand .mark::after{
+    content:''; position:absolute; inset:3px; border-radius:6px; background:var(--g-950);
+  }
+  .brand .mark::before{
+    content:''; position:absolute; inset:9px; border-radius:3px;
+    background:linear-gradient(135deg, var(--ember), var(--ion));
+    animation:corePulse 2.4s ease-in-out infinite;
+  }
+  @keyframes corePulse{ 0%,100%{ opacity:.55; transform:scale(.85);} 50%{ opacity:1; transform:scale(1);} }
+  .brand h1{ font-family:var(--font-d); font-size:clamp(17px,2.1vw,22px); font-weight:700; margin:0; letter-spacing:.2px; }
+  .brand p{ margin:2px 0 0; font-size:11px; color:var(--t-500); letter-spacing:.3px; }
+
+  .status-pill{
+    display:flex; align-items:center; gap:9px; padding:9px 15px; border-radius:30px;
+    border:1px solid var(--line); background:var(--g-900);
+    font-size:11px; letter-spacing:.5px; text-transform:uppercase;
+    transition:border-color .3s var(--ease), color .3s var(--ease), background .3s var(--ease);
+  }
+  .status-pill .dot{ width:8px; height:8px; border-radius:50%; background:var(--mint); box-shadow:0 0 8px var(--mint); }
+  .status-pill.warn{ color:var(--amber); border-color:var(--ember-dim); }
+  .status-pill.warn .dot{ background:var(--amber); box-shadow:0 0 10px var(--amber); }
+  .status-pill.crit{ color:var(--crit); border-color:#5c1e28; background:rgba(255,79,100,0.06); }
+  .status-pill.crit .dot{ background:var(--crit); box-shadow:0 0 12px var(--crit); animation:blink .8s infinite; }
+  @keyframes blink{ 0%,100%{ opacity:1;} 50%{ opacity:.25;} }
+
+  /* ---------------- alert banner ---------------- */
+  .alert-banner{
+    max-height:0; opacity:0; overflow:hidden;
+    border-radius:10px; margin-bottom:0;
+    transition:max-height .45s var(--ease), opacity .35s var(--ease), margin .45s var(--ease);
+    font-family:var(--font-d); font-weight:600; letter-spacing:.4px;
+    display:flex; align-items:center; gap:10px; padding:0 16px;
+  }
+  .alert-banner.show{ max-height:60px; opacity:1; margin-bottom:16px; padding:12px 16px; }
+  .alert-banner.warn{ background:rgba(245,179,66,0.09); border:1px solid var(--ember-dim); color:var(--amber); }
+  .alert-banner.crit{ background:rgba(255,79,100,0.10); border:1px solid #5c1e28; color:var(--crit); animation:shake .35s var(--ease); }
+  @keyframes shake{ 0%,100%{transform:translateX(0);} 25%{transform:translateX(-3px);} 75%{transform:translateX(3px);} }
+
+  /* ---------------- generic panel ---------------- */
+  .panel{
+    background:linear-gradient(180deg, var(--g-900), var(--g-850));
+    border:1px solid var(--line); border-radius:14px;
+    padding:16px 18px 16px;
+    opacity:0; transform:translateY(14px);
+    animation:rise .6s var(--ease) forwards;
+  }
+  @keyframes rise{ to{ opacity:1; transform:translateY(0);} }
+  .panel h2{
+    font-family:var(--font-d); font-size:12.5px; font-weight:600; letter-spacing:.6px;
+    text-transform:uppercase; color:var(--t-500); margin:0 0 14px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .panel h2 .tag{
+    font-family:var(--font-m); font-size:10px; font-weight:500; color:var(--ion);
+    border:1px solid var(--ion-dim); border-radius:20px; padding:2px 9px; letter-spacing:.4px;
+    transition:all .25s var(--ease);
+  }
+  .panel.runaway{ animation:rise .6s var(--ease) forwards, alarmGlow 1.1s infinite; }
+  @keyframes alarmGlow{
+    0%,100%{ box-shadow:0 0 0 1px rgba(255,79,100,0); }
+    50%{ box-shadow:0 0 0 1px rgba(255,79,100,.6), 0 0 26px rgba(255,79,100,.2); }
+  }
+
+  /* ---------------- hero layout ---------------- */
+  .hero{ display:grid; grid-template-columns:1.5fr 1fr; gap:16px; }
+  canvas{ display:block; width:100%; }
+  #packCanvas{ height:380px; cursor:crosshair; }
+
+  .cell-tooltip{
+    position:absolute; pointer-events:none; background:#05070a; border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px; font-size:11px; line-height:1.5; color:var(--t-300);
+    opacity:0; transform:translate(-50%,-115%); transition:opacity .12s;
+    white-space:nowrap; z-index:10; box-shadow:0 8px 20px rgba(0,0,0,.4);
+  }
+  .cell-tooltip b{ color:var(--t-100); }
+  .cell-tooltip .swatch{ display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:5px; }
+
+  .pack-legend{ display:flex; justify-content:space-between; align-items:center; margin-top:10px; font-size:10px; color:var(--t-700); letter-spacing:.3px; }
+  .pack-scale{ flex:1; height:7px; margin:0 10px; border-radius:4px;
+    background:linear-gradient(90deg,#2b3a6e,#2b8ea6,#3fc98a,#c7d24a,#f5b342,#ef5b4a,#a4194c); }
+
+  /* ---------------- gauge cluster ---------------- */
+  .gauge-wrap{ display:flex; flex-direction:column; align-items:center; }
+  #gaugeSvg{ width:100%; max-width:280px; height:auto; }
+  .gauge-readout{ text-align:center; margin-top:-58px; }
+  .gauge-readout .num{ font-family:var(--font-d); font-weight:700; font-size:clamp(30px,4.4vw,40px); font-variant-numeric:tabular-nums; }
+  .gauge-readout .lbl{ font-size:10px; letter-spacing:.6px; color:var(--t-500); text-transform:uppercase; margin-top:2px; }
+  .needle{ transition:transform .4s var(--ease); transform-origin:140px 140px; }
+
+  .mini-stats{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; width:100%; }
+  .mini-stat{ background:var(--g-800); border:1px solid var(--line-soft); border-radius:10px; padding:9px 11px; }
+  .mini-stat .k{ font-size:9.5px; color:var(--t-700); text-transform:uppercase; letter-spacing:.5px; }
+  .mini-stat .v{ font-family:var(--font-d); font-size:17px; font-weight:600; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .mini-stat .bar{ height:4px; border-radius:3px; background:var(--g-750); margin-top:7px; overflow:hidden; }
+  .mini-stat .bar i{ display:block; height:100%; border-radius:3px; transition:width .4s var(--ease), background .4s var(--ease); }
+
+  /* ---------------- controls deck ---------------- */
+  .deck{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-top:16px; }
+  .control-label{ display:flex; justify-content:space-between; font-size:11px; color:var(--t-500);
+    letter-spacing:.4px; margin-bottom:9px; text-transform:uppercase; }
+  .control-label span.val{ color:var(--ion); font-weight:600; font-family:var(--font-m); }
+  .control-group{ margin-bottom:15px; } .control-group:last-child{ margin-bottom:0; }
+
+  .pill-row{ display:flex; flex-wrap:wrap; gap:6px; }
+  .pill{
+    flex:1 1 auto; text-align:center; padding:9px 8px; border-radius:8px;
+    border:1px solid var(--line); background:var(--g-800); color:var(--t-500);
+    font-family:var(--font-m); font-size:11px; letter-spacing:.3px; cursor:pointer;
+    transition:all .18s var(--ease); user-select:none; position:relative; overflow:hidden;
+  }
+  .pill:hover{ border-color:var(--t-700); color:var(--t-100); transform:translateY(-1px); }
+  .pill.active{ background:rgba(79,209,255,0.10); border-color:var(--ion); color:var(--ion);
+    box-shadow:inset 0 0 0 1px rgba(79,209,255,.25); }
+  .pill.active.heat-mode{ background:rgba(255,138,76,0.10); border-color:var(--ember); color:var(--ember);
+    box-shadow:inset 0 0 0 1px rgba(255,138,76,.25); }
+
+  .slider-track{ position:relative; height:5px; border-radius:3px; background:var(--g-750); }
+  .slider-track i{ position:absolute; left:0; top:0; height:100%; border-radius:3px;
+    background:linear-gradient(90deg, var(--ion-dim), var(--ion)); transition:width .12s linear; }
+  input[type=range]{
+    -webkit-appearance:none; appearance:none; width:100%; height:5px; margin-top:-5px;
+    background:transparent; position:relative; z-index:2;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+    background:var(--ion); box-shadow:0 0 0 3px rgba(79,209,255,.16), 0 0 10px rgba(79,209,255,.55);
+    cursor:pointer; border:2px solid var(--g-950); margin-top:0; transition:transform .12s;
+  }
+  input[type=range]:active::-webkit-slider-thumb{ transform:scale(1.15); }
+  input[type=range]::-moz-range-thumb{
+    width:16px; height:16px; border-radius:50%; background:var(--ion); border:2px solid var(--g-950);
+    cursor:pointer; box-shadow:0 0 10px rgba(79,209,255,.55);
+  }
+  .control-group.disabled{ opacity:.35; pointer-events:none; }
+
+  .btn-row{ display:flex; gap:8px; margin-top:6px; }
+  button.action{
+    flex:1; padding:11px 8px; border-radius:9px; border:1px solid var(--line);
+    background:var(--g-800); color:var(--t-100); font-family:var(--font-m); font-size:11px;
+    letter-spacing:.3px; cursor:pointer; transition:all .18s var(--ease); position:relative; overflow:hidden;
+  }
+  button.action:hover{ border-color:var(--t-700); }
+  button.action:active{ transform:scale(.96); }
+  button.action.primary{ background:linear-gradient(135deg, rgba(255,138,76,.14), rgba(79,209,255,.10));
+    border-color:var(--ion); color:var(--t-100); }
+  .ripple{ position:absolute; border-radius:50%; background:rgba(255,255,255,.35); transform:scale(0);
+    animation:rip .55s ease-out forwards; pointer-events:none; }
+  @keyframes rip{ to{ transform:scale(3.2); opacity:0; } }
+
+  /* ---------------- charts row ---------------- */
+  .charts{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:16px; }
+  #barCanvas,#timeCanvas,#energyCanvas{ height:180px; }
+
+  footer.note{ margin-top:28px; font-size:11px; color:var(--t-900); text-align:center; letter-spacing:.3px; }
+
+  /* ---------------- modal ---------------- */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(4,6,9,.75); backdrop-filter:blur(3px);
+    display:flex; align-items:center; justify-content:center; z-index:50;
+    opacity:0; visibility:hidden; pointer-events:none;
+    transition:opacity .28s var(--ease), visibility .28s var(--ease);
+  }
+  .modal-overlay.open{ opacity:1; visibility:visible; pointer-events:auto; }
+  .modal-box{
+    width:min(960px,92vw); background:var(--g-900); border:1px solid var(--line); border-radius:16px;
+    padding:24px; max-height:88vh; overflow:auto;
+    transform:scale(.94) translateY(10px); transition:transform .3s var(--ease);
+  }
+  .modal-overlay.open .modal-box{ transform:scale(1) translateY(0); }
+  .modal-box h3{ font-family:var(--font-d); font-size:17px; margin:0 0 4px; }
+  .modal-box p.sub{ margin:0 0 16px; font-size:12px; color:var(--t-500); }
+  .modal-grid{ display:grid; grid-template-columns:1.3fr 1fr; gap:20px; }
+  .modal-close{ float:right; background:none; border:1px solid var(--line); color:var(--t-500);
+    border-radius:7px; padding:7px 11px; cursor:pointer; font-family:var(--font-m); font-size:11px; transition:all .2s; }
+  .modal-close:hover{ color:var(--t-100); border-color:var(--ion); }
+  .compare-legend{ display:flex; gap:14px; margin-top:10px; font-size:11px; color:var(--t-500); flex-wrap:wrap; }
+  .compare-legend .sw{ display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; }
+
+  /* ---------------- readout list (used inside mini panel on mobile) ---------------- */
+  .readout{ font-size:12px; line-height:1.85; }
+  .readout .row{ display:flex; justify-content:space-between; border-bottom:1px dashed var(--line-soft); padding:3px 0; }
+  .readout .k{ color:var(--t-500);} .readout .v{ font-weight:600; }
+
+  /* ---------------- responsive ---------------- */
+  @media (max-width:1080px){
+    .hero{ grid-template-columns:1fr; }
+    .deck{ grid-template-columns:1fr 1fr; }
+    .charts{ grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width:640px){
+    .deck{ grid-template-columns:1fr; }
+    .charts{ grid-template-columns:1fr; }
+    .mini-stats{ grid-template-columns:1fr 1fr; }
+    .shell{ padding:14px 12px 50px; }
+    header.top{ gap:10px; }
+  }
+  /* larger touch targets on touch/coarse-pointer devices (phones & tablets) */
+  @media (pointer:coarse){
+    .pill{ padding:13px 10px; font-size:12px; }
+    button.action{ padding:14px 8px; font-size:12px; }
+    input[type=range]::-webkit-slider-thumb{ width:22px; height:22px; }
+    input[type=range]::-moz-range-thumb{ width:22px; height:22px; }
+    input[type=range]{ height:7px; }
+    .slider-track{ height:7px; }
+    .status-pill, .back-link{ padding:11px 16px; }
+  }
+
+  /* ================= PAGE SWITCHER (landing <-> dashboard) =================
+     Both pages are fixed, full-viewport overlays stacked exactly on top of
+     one another. Only the page with .active is visible/interactive, so the
+     dashboard genuinely pops up over the front page instead of appearing
+     below it in normal document flow. */
+  .page{
+    position:fixed; inset:0; width:100%; height:100%;
+    overflow-y:auto; -webkit-overflow-scrolling:touch;
+    opacity:0; visibility:hidden; pointer-events:none;
+    transform:scale(0.95);
+    transition:opacity .42s var(--ease), transform .42s var(--ease), visibility 0s linear .42s;
+  }
+  .page.active{
+    opacity:1; visibility:visible; pointer-events:auto; transform:scale(1);
+    transition:opacity .42s var(--ease), transform .42s var(--ease), visibility 0s linear;
+  }
+  .landing-page{ z-index:1; }
+  .dashboard-page{ z-index:2; }
+
+  .back-link{
+    background:var(--g-800); border:1px solid var(--line); color:var(--t-500);
+    border-radius:8px; padding:9px 14px; font-family:var(--font-m); font-size:11px;
+    letter-spacing:.3px; cursor:pointer; transition:all .2s var(--ease); margin-right:14px;
+  }
+  .back-link:hover{ color:var(--ion); border-color:var(--ion-dim); transform:translateX(-2px); }
+  header.top{ flex-wrap:wrap; }
+
+  /* ================= LANDING PAGE ================= */
+  .landing-page{
+    display:flex; align-items:center; justify-content:center; padding:48px 20px;
+  }
+  .landing-bg{
+    position:absolute; inset:-10%;
+    background:
+      radial-gradient(700px 500px at 20% 15%, rgba(79,209,255,0.10), transparent 60%),
+      radial-gradient(700px 500px at 85% 80%, rgba(255,138,76,0.09), transparent 60%);
+    animation:bgDrift 14s ease-in-out infinite alternate;
+    z-index:0;
+  }
+  @keyframes bgDrift{ from{ transform:scale(1) translate(0,0); } to{ transform:scale(1.1) translate(-2%,2%); } }
+
+  .landing-inner{
+    position:relative; z-index:1; max-width:760px; width:100%;
+    display:flex; flex-direction:column; align-items:center; text-align:center; gap:16px;
+  }
+  .landing-eyebrow{
+    font-family:var(--font-m); font-size:11px; letter-spacing:2.2px; color:var(--ion);
+    text-transform:uppercase; opacity:.9;
+    opacity:0; animation:rise .6s var(--ease) .05s forwards;
+  }
+  .landing-title{
+    font-family:var(--font-d); font-weight:700; font-size:clamp(28px,5.4vw,50px); line-height:1.1; margin:0;
+    background:linear-gradient(135deg,#f4f7fa,#9fb0c2 60%,#4fd1ff);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    opacity:0; animation:rise .65s var(--ease) .12s forwards;
+  }
+  .landing-sub{
+    color:var(--t-500); font-size:clamp(13px,1.7vw,15.5px); max-width:560px; margin:0; line-height:1.65;
+    opacity:0; animation:rise .65s var(--ease) .2s forwards;
+  }
+
+  .hero-click{
+    position:relative; width:min(340px,66vw); aspect-ratio:1/1; cursor:pointer;
+    margin:14px 0 22px; border-radius:50%; overflow:hidden; -webkit-tap-highlight-color:transparent;
+    opacity:0; animation:heroPop .7s var(--ease) .28s forwards;
+    transition:transform .3s var(--ease);
+  }
+  @keyframes heroPop{ from{ opacity:0; transform:scale(.85);} to{ opacity:1; transform:scale(1);} }
+  .hero-click:hover{ transform:scale(1.03); }
+  .hero-click:active{ transform:scale(0.98); }
+  #heroCanvas{ width:100%; height:100%; display:block; }
+  .hero-ring{ position:absolute; inset:0; border-radius:50%; border:1px solid var(--line); pointer-events:none; }
+  .hero-ring::before{
+    content:''; position:absolute; inset:-9px; border-radius:50%;
+    border:1px dashed rgba(79,209,255,.28); animation:ringSpin 24s linear infinite;
+  }
+  .hero-ring::after{
+    content:''; position:absolute; inset:-18px; border-radius:50%;
+    border:1px dotted rgba(255,138,76,.18); animation:ringSpin 34s linear infinite reverse;
+  }
+  @keyframes ringSpin{ to{ transform:rotate(360deg); } }
+  .hero-cta{
+    position:absolute; left:50%; bottom:6%; transform:translate(-50%,0);
+    display:flex; align-items:center; gap:8px; background:rgba(10,13,18,.85); backdrop-filter:blur(4px);
+    border:1px solid var(--ion); color:var(--ion); padding:10px 18px; border-radius:30px;
+    font-family:var(--font-m); font-size:12px; letter-spacing:.4px; white-space:nowrap;
+    box-shadow:0 0 24px rgba(79,209,255,.22); transition:box-shadow .25s var(--ease);
+  }
+  .hero-click:hover .hero-cta{ box-shadow:0 0 34px rgba(79,209,255,.4); }
+  .play-badge{ font-size:10px; }
+
+  .landing-features{
+    display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:600px;
+    opacity:0; animation:rise .6s var(--ease) .4s forwards;
+  }
+  .feat{
+    display:flex; align-items:center; gap:6px; background:var(--g-800); border:1px solid var(--line-soft);
+    border-radius:20px; padding:7px 13px; font-size:11.5px; color:var(--t-300);
+  }
+  .feat .ic{ font-size:13px; }
+
+  .landing-hint{
+    font-size:11px; color:var(--t-700); margin-top:2px;
+    opacity:0; animation:rise .6s var(--ease) .5s forwards, hintBob 1.8s ease-in-out 1.2s infinite;
+  }
+  @keyframes hintBob{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(4px); } }
+
+  /* zoom-in transition when entering the simulator */
+  body.entering .hero-click{ animation:zoomIn .62s var(--ease) forwards; z-index:5; }
+  @keyframes zoomIn{ to{ transform:scale(11); opacity:0; } }
+  body.entering .landing-inner > *:not(.hero-click){ animation:fadeOutUp .38s var(--ease) forwards; }
+  @keyframes fadeOutUp{ to{ opacity:0; transform:translateY(-14px); } }
+
+  @media (max-width:640px){
+    .landing-page{ padding:32px 16px; }
+    .landing-features{ gap:6px; }
+    .feat{ padding:6px 10px; font-size:10.5px; }
+  }
+
+
+  /* ---------------- selected-cell history, events & fault controls ---------------- */
+  .chart-hint{
+    margin:-5px 0 10px; color:var(--t-700); font-size:10px; line-height:1.5;
+  }
+  .event-log{
+    margin-top:12px; padding:9px 10px; min-height:68px; max-height:116px; overflow:auto;
+    border:1px solid var(--line-soft); border-radius:9px; background:rgba(4,7,10,.34);
+  }
+  .event-log .event-empty{ color:var(--t-700); font-size:10px; }
+  .event-log .event-row{
+    display:grid; grid-template-columns:48px 1fr; gap:7px; padding:4px 0;
+    border-bottom:1px dashed var(--line-soft); font-size:9.5px; line-height:1.4;
+  }
+  .event-log .event-row:last-child{ border-bottom:0; }
+  .event-log .event-time{ color:var(--ion); }
+  .event-log .event-msg{ color:var(--t-500); }
+  .event-log .event-row.warn .event-msg{ color:var(--amber); }
+  .event-log .event-row.crit .event-msg{ color:var(--crit); }
+  button.action.fault-active{
+    color:var(--crit); border-color:#7b2632; background:rgba(255,79,100,.09);
+    box-shadow:inset 0 0 0 1px rgba(255,79,100,.12);
+  }
+
+</style>
+</head>
+<body>
+
+<div id="landingPage" class="page landing-page active">
+  <div class="landing-bg"></div>
+  <div class="landing-inner">
+    <div class="landing-eyebrow">Digital Twin &middot; Thermal Management</div>
+    <h1 class="landing-title">Battery Thermal<br>Management Digital Twin</h1>
+    <p class="landing-sub">Simulate charging, driving and fast-discharge heat loads across a live 6×6 cell pack, then compare air, liquid and passive cooling in real time.</p>
+
+    <div class="hero-click" id="heroClick" role="button" tabindex="0" aria-label="Enter the digital twin simulation">
+      <canvas id="heroCanvas"></canvas>
+      <div class="hero-ring"></div>
+      <div class="hero-cta"><span class="play-badge">&#9654;</span><span>Enter Simulation</span></div>
+    </div>
+
+    <div class="landing-features">
+      <div class="feat"><span class="ic">&#127777;&#65039;</span>Cell Heatmap</div>
+      <div class="feat"><span class="ic">&#128168;</span>Air Cooling</div>
+      <div class="feat"><span class="ic">&#128167;</span>Liquid Cooling</div>
+      <div class="feat"><span class="ic">&#10052;&#65039;</span>Passive Cooling</div>
+      <div class="feat"><span class="ic">&#9888;&#65039;</span>Runaway Alerts</div>
+      <div class="feat"><span class="ic">&#9889;</span>Energy Tracking</div>
+    </div>
+
+  </div>
+</div>
+
+<div id="dashboardPage" class="page dashboard-page">
+<div class="shell">
+
+  <header class="top">
+    <button class="back-link" id="backBtn" aria-label="Back to front page">&larr; Front page</button>
+    <div class="brand">
+      <div class="mark"></div>
+      <div>
+        <h1>Battery Thermal Digital Twin</h1>
+        <p>6×6 pack · live simulation · air / liquid / passive cooling</p>
+      </div>
+    </div>
+    <div class="status-pill" id="statusPill">
+      <span class="dot"></span><span id="statusLabel">Nominal</span>
+    </div>
+  </header>
+
+  <div class="alert-banner" id="alertBanner">
+    <span id="alertIcon">⚠</span><span id="alertText"></span>
+  </div>
+
+  <div class="hero">
+    <div class="panel" id="packPanel" style="position:relative;">
+      <h2>Pack Visualization &amp; Cooling Flow <span class="tag" id="coolTag">Air</span></h2>
+      <canvas id="packCanvas"></canvas>
+      <div class="cell-tooltip" id="cellTip"></div>
+      <div class="pack-legend"><span>Cold</span><div class="pack-scale"></div><span>Runaway</span></div>
+    </div>
+
+    <div class="panel gauge-wrap">
+      <h2 style="align-self:flex-start;width:100%;">Instrument Cluster</h2>
+      <svg id="gaugeSvg" viewBox="0 0 280 170">
+        <defs>
+          <linearGradient id="zoneOk" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#2b6b8f"/><stop offset="100%" stop-color="#46d19a"/>
+          </linearGradient>
+        </defs>
+        <path d="M 20 140 A 120 120 0 0 1 82 32" fill="none" stroke="url(#zoneOk)" stroke-width="14" stroke-linecap="round"/>
+        <path d="M 82 32 A 120 120 0 0 1 198 32" fill="none" stroke="#f5b342" stroke-width="14" stroke-linecap="round"/>
+        <path d="M 198 32 A 120 120 0 0 1 260 140" fill="none" stroke="#ff4f64" stroke-width="14" stroke-linecap="round"/>
+        <g id="ticks"></g>
+        <line id="needle" class="needle" x1="140" y1="140" x2="140" y2="40" stroke="#eef2f7" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="140" cy="140" r="8" fill="#eef2f7"/>
+        <circle cx="140" cy="140" r="4" fill="#0a0d12"/>
+      </svg>
+      <div class="gauge-readout">
+        <div class="num" id="gaugeNum">25°</div>
+        <div class="lbl">Max Cell Temperature</div>
+      </div>
+
+      <div class="mini-stats">
+        <div class="mini-stat"><div class="k">Avg Temp</div><div class="v" id="statAvg">25.0°C</div>
+          <div class="bar"><i id="barAvg" style="width:0%;background:var(--mint);"></i></div></div>
+        <div class="mini-stat"><div class="k">Spread</div><div class="v" id="statSpread">0.0°C</div>
+          <div class="bar"><i id="barSpread" style="width:0%;background:var(--ion);"></i></div></div>
+        <div class="mini-stat"><div class="k">Power Draw</div><div class="v" id="statPower">0.0 W</div>
+          <div class="bar"><i id="barPower" style="width:0%;background:var(--ember);"></i></div></div>
+        <div class="mini-stat"><div class="k">Energy Used</div><div class="v" id="statEnergy">0.00 Wh</div>
+          <div class="bar"><i id="barEnergy" style="width:0%;background:var(--ember);"></i></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="deck">
+    <div class="panel">
+      <h2>Operating Mode</h2>
+      <div class="pill-row" id="modeGroup"></div>
+      <h2 style="margin-top:16px;">Cooling Type</h2>
+      <div class="pill-row" id="coolGroup"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Cooling &amp; Ambient</h2>
+      <div class="control-group" id="fanGroup">
+        <div class="control-label">Fan Speed <span class="val" id="fanVal">50%</span></div>
+        <div class="slider-track"><i id="fanFill"></i></div>
+        <input type="range" id="fanSlider" min="0" max="100" value="50">
+      </div>
+      <div class="control-group" id="flowGroup">
+        <div class="control-label">Coolant Flow <span class="val" id="flowValLbl">50%</span></div>
+        <div class="slider-track"><i id="flowFill"></i></div>
+        <input type="range" id="flowSlider" min="0" max="100" value="50">
+      </div>
+      <div class="control-group">
+        <div class="control-label">Ambient Temperature <span class="val" id="ambVal">25°C</span></div>
+        <div class="slider-track"><i id="ambFill"></i></div>
+        <input type="range" id="ambSlider" min="-10" max="45" value="25">
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Simulation</h2>
+      <div class="readout" id="readout"></div>
+      <div class="btn-row">
+        <button class="action" id="pauseBtn">⏸ Pause</button>
+        <button class="action" id="resetBtn">⟲ Reset</button>
+      </div>
+      <div class="btn-row">
+        <button class="action" id="faultBtn">⚠ Inject Selected-Cell Fault</button>
+        <button class="action" id="clearFaultBtn">✓ Clear Fault</button>
+      </div>
+      <div class="event-log" id="eventLog" aria-live="polite"></div>
+      <div class="btn-row">
+        <button class="action primary" id="compareBtn">⇄ Compare Cooling Modes</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="charts">
+    <div class="panel"><h2>Selected Cell Temperature History <span class="tag" id="selectedTag">Cells 0, 17, 35</span></h2>
+      <p class="chart-hint">Click cells in the pack to add or remove up to three comparison traces. Historical readings are retained for every cell.</p>
+      <canvas id="barCanvas"></canvas></div>
+    <div class="panel"><h2>Pack Temperature Over Time</h2><canvas id="timeCanvas"></canvas></div>
+    <div class="panel"><h2>Cooling Energy Consumption</h2><canvas id="energyCanvas"></canvas></div>
+  </div>
+
+  <footer class="note">Semi-implicit thermal integrator · per-cell history · fault-aware comparison · automatic emergency restoration · client-side</footer>
+</div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal-box">
+    <button class="modal-close" id="modalClose">Close ✕</button>
+    <h3>Cooling Comparison — 1 Hour Simulation</h3>
+    <p class="sub" id="modalSub"></p>
+    <div class="modal-grid">
+      <div>
+        <canvas id="cmpTempCanvas" style="height:280px;"></canvas>
+        <div class="compare-legend">
+          <span><span class="sw" style="background:#8a97a8"></span>Passive</span>
+          <span><span class="sw" style="background:#4fd1ff"></span>Air</span>
+          <span><span class="sw" style="background:#46d19a"></span>Liquid</span>
+        </div>
+      </div>
+      <div><canvas id="cmpEnergyCanvas" style="height:280px;"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* =====================================================================
+   PHYSICS  (validated model — identical constants/behavior throughout)
+===================================================================== */
+const ROWS=6, COLS=6, N=ROWS*COLS;
+const DT=2.0, TICK_MS=200, MAX_HISTORY=300;
+const WARN_T=60.0, CRIT_T=80.0;
+const EMERGENCY_RELEASE_T=55.0, EMERGENCY_HOLD_S=30.0, FAULT_HEAT_W=100.0;
+const C_THERMAL=40.0, K_COND=0.6;
+const HEAT_GEN={ 'Idle':1.0,'Charging':5.0,'Driving':8.0,'Fast Discharge':20.0 };
+const MODES=Object.keys(HEAT_GEN);
+const COOLINGS=['Passive','Air','Liquid'];
+
+function seededRandom(seed){
+  let s=seed%2147483647; if(s<=0) s+=2147483646;
+  return function(){ s=(s*16807)%2147483647; return (s-1)/2147483646; };
+}
+const rand=seededRandom(42);
+const resistanceFactor=new Float64Array(N);
+for(let i=0;i<N;i++) resistanceFactor[i]=0.85+rand()*0.30;
+
+const COLOR_STOPS=[
+  {t:-10,c:[43,58,110]},{t:15,c:[43,110,150]},{t:30,c:[43,170,140]},
+  {t:45,c:[120,190,80]},{t:60,c:[245,179,66]},{t:80,c:[239,91,74]},{t:105,c:[164,25,76]},
+];
+function tempToColor(t){
+  if(t<=COLOR_STOPS[0].t) return COLOR_STOPS[0].c;
+  for(let i=0;i<COLOR_STOPS.length-1;i++){
+    const a=COLOR_STOPS[i],b=COLOR_STOPS[i+1];
+    if(t>=a.t&&t<=b.t){
+      const f=(t-a.t)/(b.t-a.t);
+      return [Math.round(a.c[0]+(b.c[0]-a.c[0])*f),Math.round(a.c[1]+(b.c[1]-a.c[1])*f),Math.round(a.c[2]+(b.c[2]-a.c[2])*f)];
+    }
+  }
+  return COLOR_STOPS[COLOR_STOPS.length-1].c;
+}
+const rgb=a=>`rgb(${a[0]},${a[1]},${a[2]})`;
+const rgba=(a,al)=>`rgba(${a[0]},${a[1]},${a[2]},${al})`;
+
+function heatGenArr(T,mode,rf,out,faultCell=-1,faultHeat=0){
+  const base=HEAT_GEN[mode];
+  for(let i=0;i<N;i++){
+    const over=Math.max(0,T[i]-65.0);
+    const selfHeating=base*rf[i]*(1+0.12*over);
+    out[i]=selfHeating+(i===faultCell?faultHeat:0);
+  }
+}
+function coolingHArr(cooling,fan,flow,out){
+  const fanF=fan/100.0, flowF=flow/100.0;
+  if(cooling==='Passive'){ for(let i=0;i<N;i++) out[i]=1.5; return; }
+  if(cooling==='Air'){
+    const hBase=2.0+fanF*18.0;
+    for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){ const grad=1.0-0.30*(c/(COLS-1)); out[r*COLS+c]=hBase*grad; }
+    return;
+  }
+  const hBase=5.0+flowF*40.0;
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){ const grad=1.0-0.05*(c/(COLS-1)); out[r*COLS+c]=hBase*grad; }
+}
+function conductionArr(T,out){
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const i=r*COLS+c; let q=0;
+    if(r>0) q+=K_COND*(T[i-COLS]-T[i]);
+    if(r<ROWS-1) q+=K_COND*(T[i+COLS]-T[i]);
+    if(c>0) q+=K_COND*(T[i-1]-T[i]);
+    if(c<COLS-1) q+=K_COND*(T[i+1]-T[i]);
+    out[i]=q;
+  }
+}
+function powerConsumption(cooling,fan,flow){
+  if(cooling==='Passive') return 0.0;
+  if(cooling==='Air') return 50.0*Math.pow(fan/100.0,3);
+  return 80.0*Math.pow(flow/100.0,3);
+}
+const _Qgen=new Float64Array(N), _H=new Float64Array(N), _Qc=new Float64Array(N);
+function stepState(T,mode,cooling,fan,flow,ambient,rf,dt,faultCell=-1,faultHeat=0){
+  heatGenArr(T,mode,rf,_Qgen,faultCell,faultHeat); coolingHArr(cooling,fan,flow,_H); conductionArr(T,_Qc);
+  for(let i=0;i<N;i++){
+    const num=T[i]+dt/C_THERMAL*(_Qgen[i]+_Qc[i])+dt/C_THERMAL*_H[i]*ambient;
+    const den=1.0+dt/C_THERMAL*_H[i];
+    let v=num/den; if(v<-20)v=-20; if(v>150)v=150; T[i]=v;
+  }
+}
+
+/* =====================================================================
+   STATE
+===================================================================== */
+const CELL_SERIES_COLORS=['#4fd1ff','#46d19a','#ff8a4c'];
+const state={
+  mode:'Driving', cooling:'Air', fan:50, flow:50, ambient:25,
+  T:new Float64Array(N), time:0, energyWh:0, paused:false, flowPhase:0, pulse:0,
+  selectedCells:[0,17,35], faultCell:-1, faultHeat:FAULT_HEAT_W,
+  emergency:{ active:false, previous:null, coolSeconds:0 },
+  events:[],
+  hist:{ t:[],max:[],min:[],avg:[],power:[],energy:[],cells:Array.from({length:N},()=>[]) },
+};
+function resetState(){
+  state.T.fill(state.ambient); state.time=0; state.energyWh=0; state.flowPhase=0;
+  state.faultCell=-1;
+  state.emergency={ active:false, previous:null, coolSeconds:0 };
+  state.events=[];
+  state.hist={ t:[],max:[],min:[],avg:[],power:[],energy:[],cells:Array.from({length:N},()=>[]) };
+}
+resetState();
+
+function tick(){
+  if(!state.paused){
+    const activeFaultHeat=state.faultCell>=0?state.faultHeat:0;
+    stepState(state.T,state.mode,state.cooling,state.fan,state.flow,state.ambient,resistanceFactor,DT,state.faultCell,activeFaultHeat);
+    const P=powerConsumption(state.cooling,state.fan,state.flow);
+    state.energyWh+=P*DT/3600.0; state.time+=DT; state.pulse+=1;
+    let mx=-1e9,mn=1e9,sum=0;
+    for(let i=0;i<N;i++){ const v=state.T[i]; if(v>mx)mx=v; if(v<mn)mn=v; sum+=v; }
+    const h=state.hist;
+    h.t.push(state.time); h.max.push(mx); h.min.push(mn); h.avg.push(sum/N); h.power.push(P); h.energy.push(state.energyWh);
+    for(let i=0;i<N;i++) h.cells[i].push(state.T[i]);
+    if(h.t.length>MAX_HISTORY){
+      h.t.shift();h.max.shift();h.min.shift();h.avg.shift();h.power.shift();h.energy.shift();
+      for(let i=0;i<N;i++) h.cells[i].shift();
+    }
+    updateEmergency(mx);
+    const driveVal = state.cooling==='Air'?state.fan : state.cooling==='Liquid'?state.flow : 10.0;
+    state.flowPhase += 0.02*(driveVal/100.0*6+0.3);
+  }
+  render();
+}
+
+/* =====================================================================
+   CANVAS HELPERS
+===================================================================== */
+function fitCanvas(canvas){
+  const dpr=window.devicePixelRatio||1;
+  const rect=canvas.getBoundingClientRect();
+  const w=Math.max(1,Math.round(rect.width*dpr)), h=Math.max(1,Math.round(rect.height*dpr));
+  if(canvas.width!==w||canvas.height!==h){ canvas.width=w; canvas.height=h; }
+  const ctx=canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  return { ctx, w:rect.width, h:rect.height };
+}
+const packCanvas=document.getElementById('packCanvas');
+const barCanvas=document.getElementById('barCanvas');
+const timeCanvas=document.getElementById('timeCanvas');
+const energyCanvas=document.getElementById('energyCanvas');
+
+/* =====================================================================
+   PACK VISUALIZATION — hex-packed cylindrical cells + flow animation
+===================================================================== */
+let cellGeom=[]; // cached pixel centers/radius for hit-testing & tooltip
+
+function hexLayout(rows,cols,w,h,marginX,marginY){
+  const usableW=w-marginX*2, usableH=h-marginY*2;
+  const cw=usableW/(cols+0.5);
+  const rh=usableH/rows;
+  const radius=Math.min(cw,rh)*0.46;
+  const geom=[];
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const offsetX=(r%2===1)?cw/2:0;
+      const x=marginX+cw*0.75+c*cw+offsetX;
+      const y=marginY+rh/2+r*rh;
+      geom.push({ r,c,x,y,radius, i:r*cols+c });
+    }
+  }
+  return geom;
+}
+function packLayout(w,h){ return hexLayout(ROWS,COLS,w,h,34,26); }
+
+const N_PARTICLES=22;
+function flowPositions(){
+  const phase=state.flowPhase;
+  const pos=new Array(N_PARTICLES);
+  if(state.cooling==='Air'){
+    for(let i=0;i<N_PARTICLES;i++){
+      const row=i%ROWS;
+      let x=(phase*1.2+i*0.8)%(COLS+1)-0.5;
+      pos[i]={gx:x,gy:row};
+    }
+  } else if(state.cooling==='Liquid'){
+    const pathLen=ROWS*COLS;
+    for(let i=0;i<N_PARTICLES;i++){
+      let p=(phase*2.0+i*(pathLen/N_PARTICLES))%pathLen; if(p<0)p+=pathLen;
+      const r=Math.floor(p/COLS); const cInRow=p%COLS; const c=(r%2===0)?cInRow:(COLS-1-cInRow);
+      pos[i]={gx:c,gy:r};
+    }
+  } else {
+    for(let i=0;i<N_PARTICLES;i++){
+      const ang=phase*0.5+i*(2*Math.PI/N_PARTICLES);
+      pos[i]={gx:COLS/2-0.5+1.9*Math.cos(ang), gy:ROWS/2-0.5+1.9*Math.sin(ang)*0.5};
+    }
+  }
+  return pos;
+}
+
+function drawPack(){
+  const { ctx,w,h }=fitCanvas(packCanvas);
+  ctx.clearRect(0,0,w,h);
+  cellGeom=packLayout(w,h);
+  const breathe=0.55+0.45*Math.sin(state.pulse*0.18);
+
+  // connective lattice (subtle, evokes bus-bar / thermal interface material)
+  ctx.strokeStyle='rgba(120,135,155,0.10)'; ctx.lineWidth=1;
+  for(const g of cellGeom){
+    for(const g2 of cellGeom){
+      const dx=g.x-g2.x, dy=g.y-g2.y, d=Math.hypot(dx,dy);
+      if(d>0 && d<g.radius*2.6){ ctx.beginPath(); ctx.moveTo(g.x,g.y); ctx.lineTo(g2.x,g2.y); ctx.stroke(); }
+    }
+  }
+
+  // flow particles (drawn beneath cells so they read as coolant threading the pack)
+  const flowColor = state.cooling==='Air' ? [79,209,255] : state.cooling==='Liquid' ? [79,150,255] : [110,120,132];
+  const positions=flowPositions();
+  const marginX=34, marginY=26;
+  const usableW=w-marginX*2, usableH=h-marginY*2;
+  const cw=usableW/(COLS+0.5), rh=usableH/ROWS;
+  for(const p of positions){
+    const px=marginX+cw*0.75+p.gx*cw, py=marginY+rh/2+p.gy*rh;
+    if(px<marginX-cw||px>w-marginX+cw) continue;
+    const grad=ctx.createRadialGradient(px,py,0,px,py,9);
+    grad.addColorStop(0, rgba(flowColor,0.9)); grad.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(px,py,7,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=rgb(flowColor); ctx.beginPath(); ctx.arc(px,py,2.2,0,Math.PI*2); ctx.fill();
+  }
+
+  // cylindrical cells
+  for(const g of cellGeom){
+    const t=state.T[g.i];
+    const col=tempToColor(t);
+    const hot = t>=WARN_T;
+
+    if(hot){
+      const glowR = g.radius*(1.5+0.6*breathe*((t-WARN_T)/(CRIT_T-WARN_T+1)));
+      const gg=ctx.createRadialGradient(g.x,g.y,g.radius*0.3,g.x,g.y,glowR);
+      gg.addColorStop(0, rgba(col, t>=CRIT_T?0.55:0.32));
+      gg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle=gg; ctx.beginPath(); ctx.arc(g.x,g.y,glowR,0,Math.PI*2); ctx.fill();
+    }
+
+    const bodyGrad=ctx.createRadialGradient(g.x-g.radius*0.3,g.y-g.radius*0.3,g.radius*0.1,g.x,g.y,g.radius);
+    bodyGrad.addColorStop(0, rgb(col.map(v=>Math.min(255,v+40))));
+    bodyGrad.addColorStop(1, rgb(col));
+    ctx.fillStyle=bodyGrad;
+    ctx.beginPath(); ctx.arc(g.x,g.y,g.radius,0,Math.PI*2); ctx.fill();
+
+    ctx.strokeStyle='rgba(8,10,14,0.55)'; ctx.lineWidth=2; ctx.stroke();
+    ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(g.x,g.y,g.radius-2,0,Math.PI*2); ctx.stroke();
+
+    const selectedPosition=state.selectedCells.indexOf(g.i);
+    if(selectedPosition>=0){
+      ctx.strokeStyle=CELL_SERIES_COLORS[selectedPosition]; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.arc(g.x,g.y,g.radius+3,0,Math.PI*2); ctx.stroke();
+    }
+    if(g.i===state.faultCell){
+      ctx.strokeStyle='#ff4f64'; ctx.lineWidth=3; ctx.setLineDash([5,3]);
+      ctx.beginPath(); ctx.arc(g.x,g.y,g.radius+7,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle='#ff4f64'; ctx.font='700 '+Math.max(10,g.radius*0.46)+'px "JetBrains Mono", monospace';
+      ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('!',g.x,g.y-g.radius*0.55);
+    }
+
+    ctx.fillStyle = t>55 ? 'rgba(8,10,14,0.85)' : 'rgba(255,255,255,0.92)';
+    ctx.font='600 '+Math.max(9,g.radius*0.42)+'px "JetBrains Mono", monospace';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(t.toFixed(0)+'°', g.x, g.y);
+  }
+
+  ctx.fillStyle='#7c8898'; ctx.font='500 11px "JetBrains Mono", monospace';
+  ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  let label;
+  if(state.cooling==='Air') label=`Air Cooling — Fan speed ${state.fan.toFixed(0)}%`;
+  else if(state.cooling==='Liquid') label=`Liquid Cooling (Cold Plate) — Flow ${state.flow.toFixed(0)}%`;
+  else label='Passive Cooling — Natural Convection Only';
+  ctx.fillText(label, w/2, h-6);
+
+  document.getElementById('coolTag').textContent=state.cooling;
+}
+
+/* hover tooltip */
+const cellTip=document.getElementById('cellTip');
+let tipHideTimer=null;
+function handlePackPointer(e){
+  const rect=packCanvas.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  let nearest=null, best=1e9;
+  for(const g of cellGeom){
+    const d=Math.hypot(g.x-mx,g.y-my);
+    if(d<g.radius+4 && d<best){ best=d; nearest=g; }
+  }
+  if(nearest){
+    const t=state.T[nearest.i];
+    const col=tempToColor(t);
+    const selected=state.selectedCells.includes(nearest.i)?' · selected':'';
+    const faulted=nearest.i===state.faultCell?' · FAULT ACTIVE':'';
+    cellTip.innerHTML=`<span class="swatch" style="background:${rgb(col)}"></span><b>Cell #${nearest.i}</b>${selected}${faulted}<br>Temp: <b>${t.toFixed(1)}°C</b><br>Rᵢ factor: ${resistanceFactor[nearest.i].toFixed(2)}×`;
+    cellTip.style.left=nearest.x+'px'; cellTip.style.top=nearest.y+'px'; cellTip.style.opacity='1';
+    if(e.pointerType==='touch'){
+      clearTimeout(tipHideTimer);
+      tipHideTimer=setTimeout(()=> cellTip.style.opacity='0', 2200);
+    }
+  } else if(e.pointerType!=='touch'){ cellTip.style.opacity='0'; }
+}
+function nearestCellFromEvent(e){
+  const rect=packCanvas.getBoundingClientRect();
+  const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  let nearest=null,best=1e9;
+  for(const g of cellGeom){
+    const d=Math.hypot(g.x-mx,g.y-my);
+    if(d<g.radius+4&&d<best){ best=d; nearest=g; }
+  }
+  return nearest;
+}
+function handlePackSelection(e){
+  const nearest=nearestCellFromEvent(e); if(!nearest) return;
+  const idx=nearest.i, position=state.selectedCells.indexOf(idx);
+  if(position>=0){
+    if(state.selectedCells.length===1){
+      addEvent(`Cell #${idx} remains selected because at least one comparison trace is required.`,'warn');
+      return;
+    }
+    state.selectedCells.splice(position,1);
+    addEvent(`Cell #${idx} removed from temperature comparison.`);
+  }else{
+    if(state.selectedCells.length>=3){
+      const removed=state.selectedCells.shift();
+      state.selectedCells.push(idx);
+      addEvent(`Cell #${removed} removed; Cell #${idx} added to temperature comparison.`);
+    }else{
+      state.selectedCells.push(idx);
+      addEvent(`Cell #${idx} added to temperature comparison.`);
+    }
+  }
+  render();
+}
+packCanvas.addEventListener('pointermove', handlePackPointer);
+packCanvas.addEventListener('pointerdown', handlePackPointer);
+packCanvas.addEventListener('click', handlePackSelection);
+packCanvas.addEventListener('pointerleave', (e)=>{ if(e.pointerType!=='touch') cellTip.style.opacity='0'; });
+
+/* =====================================================================
+   BAR / LINE CHARTS
+===================================================================== */
+function drawBars(){
+  const h=state.hist;
+  const series=state.selectedCells.map((cellIndex,seriesIndex)=>({
+    t:h.t,
+    data:h.cells[cellIndex]||[],
+    color:CELL_SERIES_COLORS[seriesIndex],
+    rgb:hexToRgb(CELL_SERIES_COLORS[seriesIndex]),
+    label:`Cell #${cellIndex}`,
+    fill:seriesIndex===0
+  }));
+  const selectedTag=document.getElementById('selectedTag');
+  if(selectedTag) selectedTag.textContent=state.selectedCells.map(i=>`#${i}`).join(' · ');
+  drawLineChart(barCanvas,series,{ yMin:0,yMax:110,thresholds:[{v:WARN_T,color:'#f5b342'},{v:CRIT_T,color:'#ff4f64'}] });
+}
+function roundRectTop(ctx,x,y,w,h,r){
+  if(h<=0) return;
+  r=Math.min(r,w/2,h);
+  ctx.beginPath();
+  ctx.moveTo(x,y+h);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h); ctx.closePath(); ctx.fill();
+}
+
+function drawLineChart(canvas, series, opts){
+  const { ctx,w,h }=fitCanvas(canvas);
+  ctx.clearRect(0,0,w,h);
+  const padL=34,padR=8,padT=10,padB=18, plotW=w-padL-padR, plotH=h-padT-padB;
+  const allVals=[].concat(...series.map(s=>s.data));
+  let vMin=opts.yMin!==undefined?opts.yMin:Math.min(...allVals,0);
+  let vMax=opts.yMax!==undefined?opts.yMax:Math.max(...allVals,1);
+  if(vMax-vMin<1e-6) vMax=vMin+1;
+  const tArr=series[0]?series[0].t:[];
+  const tMin=tArr.length?tArr[0]:0, tMax=tArr.length?tArr[tArr.length-1]:1;
+
+  ctx.strokeStyle='rgba(120,135,155,0.13)'; ctx.lineWidth=1;
+  ctx.font='400 9px "JetBrains Mono", monospace'; ctx.fillStyle='#57626f';
+  const nGrid=4;
+  for(let g=0; g<=nGrid; g++){
+    const yy=padT+plotH*(g/nGrid);
+    ctx.beginPath(); ctx.moveTo(padL,yy); ctx.lineTo(w-padR,yy); ctx.stroke();
+    const val=vMax-(vMax-vMin)*(g/nGrid);
+    ctx.textAlign='right'; ctx.fillText(val.toFixed(0), padL-5, yy+3);
+  }
+  if(opts.thresholds){
+    opts.thresholds.forEach(th=>{
+      if(th.v<vMin||th.v>vMax) return;
+      const yy=padT+plotH*(1-(th.v-vMin)/(vMax-vMin));
+      ctx.strokeStyle=th.color; ctx.setLineDash([4,3]); ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(padL,yy); ctx.lineTo(w-padR,yy); ctx.stroke(); ctx.setLineDash([]);
+    });
+  }
+  series.forEach(s=>{
+    if(s.data.length<2) return;
+    if(s.fill){
+      const grad=ctx.createLinearGradient(0,padT,0,padT+plotH);
+      grad.addColorStop(0, rgba(s.rgb,0.35)); grad.addColorStop(1, rgba(s.rgb,0.0));
+      ctx.fillStyle=grad; ctx.beginPath();
+      for(let i=0;i<s.data.length;i++){
+        const x=padL+plotW*((s.t[i]-tMin)/Math.max(1e-6,(tMax-tMin)));
+        const y=padT+plotH*(1-(s.data[i]-vMin)/(vMax-vMin));
+        if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.lineTo(padL+plotW,padT+plotH); ctx.lineTo(padL,padT+plotH); ctx.closePath(); ctx.fill();
+    }
+    ctx.strokeStyle=s.color; ctx.lineWidth=1.8; ctx.beginPath();
+    for(let i=0;i<s.data.length;i++){
+      const x=padL+plotW*((s.t[i]-tMin)/Math.max(1e-6,(tMax-tMin)));
+      const y=padT+plotH*(1-(s.data[i]-vMin)/(vMax-vMin));
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  });
+  let lx=padL; ctx.font='500 10px "JetBrains Mono", monospace';
+  series.forEach(s=>{
+    ctx.fillStyle=s.color; ctx.fillRect(lx,h-13,8,3);
+    ctx.fillStyle='#8a97a8'; ctx.textAlign='left'; ctx.fillText(s.label, lx+11, h-9);
+    lx += 11+ctx.measureText(s.label).width+14;
+  });
+}
+function drawTimeChart(){
+  const h=state.hist;
+  drawLineChart(timeCanvas,[
+    { t:h.t,data:h.max,color:'#ff4f64',rgb:[255,79,100],label:'Max' },
+    { t:h.t,data:h.avg,color:'#46d19a',rgb:[70,209,154],label:'Avg',fill:true },
+    { t:h.t,data:h.min,color:'#4fd1ff',rgb:[79,209,255],label:'Min' },
+  ],{ yMin:0,yMax:110, thresholds:[{v:WARN_T,color:'#f5b342'},{v:CRIT_T,color:'#ff4f64'}] });
+}
+function drawEnergyChart(){
+  const h=state.hist;
+  const maxE=h.energy.length?Math.max(...h.energy,0.5):1;
+  drawLineChart(energyCanvas,[{ t:h.t,data:h.energy,color:'#ff8a4c',rgb:[255,138,76],label:'Cumulative Wh',fill:true }],{ yMin:0,yMax:maxE*1.2 });
+}
+
+
+/* =====================================================================
+   EVENT LOG + AUTOMATIC EMERGENCY CONTROL
+===================================================================== */
+function addEvent(message,level='normal'){
+  const min=Math.floor(state.time/60),sec=Math.floor(state.time%60);
+  state.events.unshift({time:`${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`,message,level});
+  if(state.events.length>6) state.events.length=6;
+  renderEventLog();
+}
+function renderEventLog(){
+  const el=document.getElementById('eventLog'); if(!el) return;
+  if(!state.events.length){ el.innerHTML='<div class="event-empty">No events recorded.</div>'; return; }
+  el.innerHTML=state.events.map(ev=>`<div class="event-row ${ev.level}"><span class="event-time">${ev.time}</span><span class="event-msg">${ev.message}</span></div>`).join('');
+}
+function updateEmergency(maxT){
+  const emergency=state.emergency;
+  if(!emergency.active&&maxT>=CRIT_T){
+    emergency.active=true;
+    emergency.previous={mode:state.mode,cooling:state.cooling,fan:state.fan,flow:state.flow};
+    emergency.coolSeconds=0;
+    state.mode='Idle'; state.cooling='Liquid'; state.flow=100;
+    syncControlUI();
+    addEvent('Automatic emergency response activated: load set to Idle and liquid cooling set to 100%.','crit');
+    return;
+  }
+  if(!emergency.active) return;
+  if(maxT<=EMERGENCY_RELEASE_T) emergency.coolSeconds+=DT; else emergency.coolSeconds=0;
+  if(emergency.coolSeconds>=EMERGENCY_HOLD_S){
+    const previous=emergency.previous;
+    emergency.active=false; emergency.previous=null; emergency.coolSeconds=0;
+    if(previous){
+      state.mode=previous.mode; state.cooling=previous.cooling; state.fan=previous.fan; state.flow=previous.flow;
+    }
+    syncControlUI();
+    addEvent('Emergency cooldown complete. Previous mode and cooling settings restored automatically.');
+  }
+}
+
+/* =====================================================================
+   GAUGE + STATUS
+===================================================================== */
+const needle=document.getElementById('needle');
+const gaugeNum=document.getElementById('gaugeNum');
+const ticksG=document.getElementById('ticks');
+(function buildTicks(){
+  const cx=140,cy=140,rOuter=120,rInner=108;
+  for(let v=0; v<=120; v+=20){
+    const ang=Math.PI*(1-v/120); // 0 -> 180deg(left), 120 -> 0deg(right); map below
+    const a = Math.PI - (v/120)*Math.PI; // left(180deg,v=0) to right(0deg,v=120)
+    const x1=cx+rInner*Math.cos(a), y1=cy-rInner*Math.sin(a);
+    const x2=cx+rOuter*Math.cos(a), y2=cy-rOuter*Math.sin(a);
+    const line=document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1',x1); line.setAttribute('y1',y1); line.setAttribute('x2',x2); line.setAttribute('y2',y2);
+    line.setAttribute('stroke','#57626f'); line.setAttribute('stroke-width','2');
+    ticksG.appendChild(line);
+    const lx=cx+(rInner-16)*Math.cos(a), ly=cy-(rInner-16)*Math.sin(a);
+    const text=document.createElementNS('http://www.w3.org/2000/svg','text');
+    text.setAttribute('x',lx); text.setAttribute('y',ly+3); text.setAttribute('fill','#57626f');
+    text.setAttribute('font-size','10'); text.setAttribute('font-family','JetBrains Mono, monospace'); text.setAttribute('text-anchor','middle');
+    text.textContent=v; ticksG.appendChild(text);
+  }
+})();
+function setGauge(maxT){
+  const clamped=Math.max(0,Math.min(120,maxT));
+  const angDeg = 180 - (clamped/120)*180; // 180deg at 0, 0deg at 120 -> convert to rotation from vertical needle baseline
+  // needle base line drawn pointing up (x2 at top, angle 90deg); rotate so 0 => -90(left), 120 => +90(right)
+  const rotation = -90 + (clamped/120)*180;
+  needle.style.transform = `rotate(${rotation}deg)`;
+  gaugeNum.textContent = clamped.toFixed(0)+'°';
+  gaugeNum.style.color = clamped>=CRIT_T? '#ff4f64' : clamped>=WARN_T? '#f5b342' : '#eef2f7';
+}
+
+const heatPanel = document.getElementById('packPanel');
+const statusPill = document.getElementById('statusPill');
+const statusLabel = document.getElementById('statusLabel');
+const alertBanner = document.getElementById('alertBanner');
+const alertText = document.getElementById('alertText');
+const readoutEl = document.getElementById('readout');
+
+function updateStatus(){
+  let mx=-1e9,mn=1e9,sum=0;
+  for(let i=0;i<N;i++){ const v=state.T[i]; if(v>mx)mx=v; if(v<mn)mn=v; sum+=v; }
+  const avg=sum/N, spread=mx-mn;
+  const P=powerConsumption(state.cooling,state.fan,state.flow);
+
+  let level='ok';
+  if(mx>=CRIT_T) level='crit'; else if(mx>=WARN_T) level='warn';
+
+  statusPill.className='status-pill'+(level==='ok'?'':' '+level);
+  statusLabel.textContent = state.emergency.active?'Emergency Cooling':level==='ok'?'Nominal':level==='warn'?'Warning':'Critical';
+  heatPanel.classList.toggle('runaway', level==='crit');
+
+  alertBanner.className='alert-banner'+(level==='ok'?'':' show '+level);
+  alertText.textContent = level==='crit' ? 'THERMAL RUNAWAY RISK — automatic Idle mode and maximum liquid cooling are active' :
+                           level==='warn' ? 'High temperature warning — monitor pack closely' : '';
+
+  setGauge(mx);
+  document.getElementById('statAvg').textContent = avg.toFixed(1)+'°C';
+  document.getElementById('statSpread').textContent = spread.toFixed(1)+'°C';
+  document.getElementById('statPower').textContent = P.toFixed(1)+' W';
+  document.getElementById('statEnergy').textContent = state.energyWh.toFixed(2)+' Wh';
+  document.getElementById('barAvg').style.width = Math.min(100,(avg/110)*100)+'%';
+  document.getElementById('barSpread').style.width = Math.min(100,(spread/40)*100)+'%';
+  document.getElementById('barPower').style.width = Math.min(100,(P/90)*100)+'%';
+  document.getElementById('barEnergy').style.width = Math.min(100,(state.energyWh/20)*100)+'%';
+
+  const cls = v => v>=CRIT_T?'v" style="color:var(--crit)':v>=WARN_T?'v" style="color:var(--amber)':'v';
+  readoutEl.innerHTML = `
+    <div class="row"><span class="k">Mode</span><span class="v">${state.mode}</span></div>
+    <div class="row"><span class="k">Cooling</span><span class="v">${state.cooling}</span></div>
+    <div class="row"><span class="k">Ambient</span><span class="v">${state.ambient.toFixed(1)}°C</span></div>
+    <div class="row"><span class="k">Max / Min</span><span class="${cls(mx)}">${mx.toFixed(1)}° / ${mn.toFixed(1)}°</span></div>
+    <div class="row"><span class="k">Cell fault</span><span class="v" style="color:${state.faultCell>=0?'var(--crit)':'var(--mint)'}">${state.faultCell>=0?'Cell #'+state.faultCell+' · +'+state.faultHeat.toFixed(0)+' W':'None'}</span></div>
+    <div class="row"><span class="k">Emergency</span><span class="v" style="color:${state.emergency.active?'var(--crit)':'var(--mint)'}">${state.emergency.active?'Active · '+state.emergency.coolSeconds.toFixed(0)+'/'+EMERGENCY_HOLD_S.toFixed(0)+' s cool':'Standby'}</span></div>
+    <div class="row"><span class="k">Sim time</span><span class="v">${state.time.toFixed(0)} s</span></div>
+  `;
+}
+
+function render(){ drawPack(); drawBars(); drawTimeChart(); drawEnergyChart(); updateStatus(); }
+
+/* =====================================================================
+   HEADLESS SIM (comparison modal)
+===================================================================== */
+function simulateHeadless(cooling,mode,ambient,fan,flow,rf,duration,dt,initialT,faultCell=-1,faultHeat=0){
+  const T=initialT?new Float64Array(initialT):new Float64Array(N).fill(ambient);
+  const steps=Math.floor(duration/dt);
+  const t=[],maxT=[],energyArr=[]; let e=0;
+  for(let i=0;i<steps;i++){
+    stepState(T,mode,cooling,fan,flow,ambient,rf,dt,faultCell,faultHeat);
+    e+=powerConsumption(cooling,fan,flow)*dt/3600.0;
+    let mx=-1e9; for(let k=0;k<N;k++) if(T[k]>mx) mx=T[k];
+    t.push((i+1)*dt); maxT.push(mx); energyArr.push(e);
+  }
+  return { t, maxT, energy:energyArr };
+}
+
+/* =====================================================================
+   UI WIRING
+===================================================================== */
+function ripple(e, btn){
+  const r=document.createElement('span'); r.className='ripple';
+  const rect=btn.getBoundingClientRect();
+  const size=Math.max(rect.width,rect.height);
+  r.style.width=r.style.height=size+'px';
+  r.style.left=(e.clientX-rect.left-size/2)+'px'; r.style.top=(e.clientY-rect.top-size/2)+'px';
+  btn.appendChild(r); setTimeout(()=>r.remove(),600);
+}
+
+const modeGroup=document.getElementById('modeGroup');
+const coolGroup=document.getElementById('coolGroup');
+MODES.forEach(m=>{
+  const el=document.createElement('div');
+  el.className='pill'+(m===state.mode?' active heat-mode':'');
+  el.textContent=m;
+  el.addEventListener('click',(e)=>{
+    if(state.emergency.active){ addEvent('Manual operating-mode change blocked while emergency cooling is active.','warn'); return; }
+    state.mode=m;
+    [...modeGroup.children].forEach(c=>c.classList.remove('active','heat-mode'));
+    el.classList.add('active','heat-mode');
+  });
+  modeGroup.appendChild(el);
+});
+COOLINGS.forEach(cType=>{
+  const el=document.createElement('div');
+  el.className='pill'+(cType===state.cooling?' active':'');
+  el.textContent=cType;
+  el.addEventListener('click',(e)=>{
+    if(state.emergency.active){ addEvent('Manual cooling change blocked while emergency cooling is active.','warn'); return; }
+    state.cooling=cType;
+    [...coolGroup.children].forEach(c=>c.classList.remove('active'));
+    el.classList.add('active');
+    syncSliderAvailability();
+  });
+  coolGroup.appendChild(el);
+});
+
+const fanSlider=document.getElementById('fanSlider'), flowSlider=document.getElementById('flowSlider'), ambSlider=document.getElementById('ambSlider');
+const fanVal=document.getElementById('fanVal'), flowValLbl=document.getElementById('flowValLbl'), ambVal=document.getElementById('ambVal');
+const fanFill=document.getElementById('fanFill'), flowFill=document.getElementById('flowFill'), ambFill=document.getElementById('ambFill');
+
+function syncFills(){
+  fanFill.style.width=state.fan+'%';
+  flowFill.style.width=state.flow+'%';
+  ambFill.style.width=((state.ambient+10)/55*100)+'%';
+}
+fanSlider.addEventListener('input',()=>{ state.fan=parseFloat(fanSlider.value); fanVal.textContent=state.fan.toFixed(0)+'%'; syncFills(); });
+flowSlider.addEventListener('input',()=>{ state.flow=parseFloat(flowSlider.value); flowValLbl.textContent=state.flow.toFixed(0)+'%'; syncFills(); });
+ambSlider.addEventListener('input',()=>{ state.ambient=parseFloat(ambSlider.value); ambVal.textContent=state.ambient.toFixed(0)+'°C'; syncFills(); });
+syncFills();
+
+function syncSliderAvailability(){
+  document.getElementById('fanGroup').classList.toggle('disabled', state.cooling!=='Air'||state.emergency.active);
+  document.getElementById('flowGroup').classList.toggle('disabled', state.cooling!=='Liquid'||state.emergency.active);
+}
+function syncControlUI(){
+  [...modeGroup.children].forEach((c,index)=>{
+    const active=MODES[index]===state.mode;
+    c.classList.toggle('active',active); c.classList.toggle('heat-mode',active);
+  });
+  [...coolGroup.children].forEach((c,index)=>c.classList.toggle('active',COOLINGS[index]===state.cooling));
+  fanSlider.value=state.fan; flowSlider.value=state.flow; ambSlider.value=state.ambient;
+  fanVal.textContent=state.fan.toFixed(0)+'%'; flowValLbl.textContent=state.flow.toFixed(0)+'%'; ambVal.textContent=state.ambient.toFixed(0)+'°C';
+  syncFills(); syncSliderAvailability(); refreshFaultButtons();
+}
+syncSliderAvailability();
+
+const pauseBtn=document.getElementById('pauseBtn');
+pauseBtn.addEventListener('click',(e)=>{ ripple(e,pauseBtn); state.paused=!state.paused; pauseBtn.textContent=state.paused?'▶ Resume':'⏸ Pause'; });
+document.getElementById('resetBtn').addEventListener('click',(e)=>{
+  ripple(e,e.currentTarget); resetState(); syncControlUI(); addEvent('Simulation reset; fault and emergency state cleared.'); render();
+});
+const faultBtn=document.getElementById('faultBtn');
+const clearFaultBtn=document.getElementById('clearFaultBtn');
+function refreshFaultButtons(){
+  if(!faultBtn||!clearFaultBtn) return;
+  faultBtn.classList.toggle('fault-active',state.faultCell>=0);
+  faultBtn.textContent=state.faultCell>=0?`⚠ Move Fault to Selected Cell`:'⚠ Inject Selected-Cell Fault';
+  clearFaultBtn.disabled=state.faultCell<0;
+  clearFaultBtn.style.opacity=state.faultCell<0?'.45':'1';
+}
+faultBtn.addEventListener('click',(e)=>{
+  ripple(e,faultBtn);
+  const target=state.selectedCells[state.selectedCells.length-1];
+  const previous=state.faultCell;
+  state.faultCell=target;
+  if(previous<0) addEvent(`Internal-resistance fault injected into Cell #${target} (+${state.faultHeat.toFixed(0)} W).`,'crit');
+  else if(previous===target) addEvent(`Fault remains active on Cell #${target}.`,'warn');
+  else addEvent(`Fault moved from Cell #${previous} to Cell #${target}.`,'crit');
+  refreshFaultButtons(); render();
+});
+clearFaultBtn.addEventListener('click',(e)=>{
+  ripple(e,clearFaultBtn);
+  if(state.faultCell<0){ addEvent('No injected fault was active.','warn'); return; }
+  const cleared=state.faultCell; state.faultCell=-1;
+  addEvent(`Injected fault cleared from Cell #${cleared}.`);
+  refreshFaultButtons(); render();
+});
+refreshFaultButtons();
+renderEventLog();
+
+const modalOverlay=document.getElementById('modalOverlay');
+const modalSub=document.getElementById('modalSub');
+document.getElementById('compareBtn').addEventListener('click',(e)=>{
+  ripple(e,e.currentTarget);
+  const results={};
+  COOLINGS.forEach(c=>{ results[c]=simulateHeadless(c,state.mode,state.ambient,state.fan,state.flow,resistanceFactor,3600,5,state.T,state.faultCell,state.faultCell>=0?state.faultHeat:0); });
+  modalSub.textContent=`Starts from the current pack temperatures · Mode: ${state.mode} · Ambient: ${state.ambient.toFixed(0)}°C · Fan: ${state.fan.toFixed(0)}% · Coolant flow: ${state.flow.toFixed(0)}% · Fault: ${state.faultCell>=0?'Cell #'+state.faultCell+' (+'+state.faultHeat.toFixed(0)+' W)':'none'}`;
+  const colors={ Passive:'#8a97a8', Air:'#4fd1ff', Liquid:'#46d19a' };
+  const cmpCanvas=document.getElementById('cmpTempCanvas');
+  const series=COOLINGS.map(c=>({ t:results[c].t, data:results[c].maxT, color:colors[c], rgb:hexToRgb(colors[c]), label:c }));
+  modalOverlay.classList.add('open');
+  requestAnimationFrame(()=>{
+    drawLineChart(cmpCanvas, series, { yMin:0,yMax:110, thresholds:[{v:WARN_T,color:'#f5b342'},{v:CRIT_T,color:'#ff4f64'}] });
+    drawEnergyBars(document.getElementById('cmpEnergyCanvas'), COOLINGS.map(c=>({ label:c, value:results[c].energy[results[c].energy.length-1], color:colors[c] })));
+  });
+});
+document.getElementById('modalClose').addEventListener('click',()=> modalOverlay.classList.remove('open'));
+modalOverlay.addEventListener('click',(e)=>{ if(e.target===modalOverlay) modalOverlay.classList.remove('open'); });
+function hexToRgb(hex){ const n=parseInt(hex.slice(1),16); return [(n>>16)&255,(n>>8)&255,n&255]; }
+
+function drawEnergyBars(canvas, items){
+  const { ctx,w,h }=fitCanvas(canvas);
+  ctx.clearRect(0,0,w,h);
+  const padL=34,padR=14,padT=16,padB=28, plotW=w-padL-padR, plotH=h-padT-padB;
+  const maxV=Math.max(...items.map(i=>i.value),0.1)*1.2;
+  const bw=plotW/items.length*0.55, gap=plotW/items.length;
+  ctx.strokeStyle='rgba(120,135,155,0.2)'; ctx.beginPath();
+  ctx.moveTo(padL,padT); ctx.lineTo(padL,h-padB); ctx.lineTo(w-padR,h-padB); ctx.stroke();
+  items.forEach((it,idx)=>{
+    const bh=(it.value/maxV)*plotH, x=padL+gap*idx+(gap-bw)/2, y=h-padB-bh;
+    ctx.fillStyle=it.color; roundRectTop(ctx,x,y,bw,bh,6);
+    ctx.fillStyle='#eef2f7'; ctx.font='600 11px "JetBrains Mono", monospace'; ctx.textAlign='center';
+    ctx.fillText(it.value.toFixed(1), x+bw/2, y-6);
+    ctx.fillStyle='#8a97a8'; ctx.font='500 10px "JetBrains Mono", monospace';
+    ctx.fillText(it.label, x+bw/2, h-padB+14);
+  });
+  ctx.save(); ctx.translate(12,h/2); ctx.rotate(-Math.PI/2);
+  ctx.fillStyle='#57626f'; ctx.font='500 10px "JetBrains Mono", monospace'; ctx.textAlign='center';
+  ctx.fillText('Energy (Wh / hour)', 0, 0); ctx.restore();
+}
+
+/* =====================================================================
+   LANDING-PAGE HERO DEMO (decorative, independent of the live simulation)
+===================================================================== */
+const heroCanvas = document.getElementById('heroCanvas');
+let heroT = 0, heroRafId = null;
+
+function drawHeroFrame(){
+  const { ctx, w, h } = fitCanvas(heroCanvas);
+  ctx.clearRect(0,0,w,h);
+  const rows=5, cols=5;
+  const margin = Math.min(w,h)*0.14;
+  const geom = hexLayout(rows, cols, w, h, margin, margin);
+  heroT += 0.018;
+
+  // ambient flowing particles (purely decorative liquid-cooling motif)
+  const pathLen = rows*cols;
+  for(let i=0;i<10;i++){
+    let p=(heroT*9 + i*(pathLen/10)) % pathLen; if(p<0) p+=pathLen;
+    const r=Math.floor(p/cols), cInRow=p%cols, c=(r%2===0)?cInRow:(cols-1-cInRow);
+    const cell = geom[r*cols+c];
+    if(!cell) continue;
+    const grad = ctx.createRadialGradient(cell.x,cell.y,0,cell.x,cell.y,9);
+    grad.addColorStop(0,'rgba(79,209,255,0.85)'); grad.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(cell.x,cell.y,7,0,Math.PI*2); ctx.fill();
+  }
+
+  for(const g of geom){
+    const temp = 32 + 26*Math.sin(heroT*0.85 + (g.r*0.7 + g.c*0.95));
+    const col = tempToColor(temp);
+    const glowR = g.radius*1.7;
+    const gg = ctx.createRadialGradient(g.x,g.y,g.radius*0.3,g.x,g.y,glowR);
+    gg.addColorStop(0, rgba(col,0.28)); gg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=gg; ctx.beginPath(); ctx.arc(g.x,g.y,glowR,0,Math.PI*2); ctx.fill();
+
+    const bodyGrad = ctx.createRadialGradient(g.x-g.radius*0.3,g.y-g.radius*0.3,g.radius*0.1,g.x,g.y,g.radius);
+    bodyGrad.addColorStop(0, rgb(col.map(v=>Math.min(255,v+40))));
+    bodyGrad.addColorStop(1, rgb(col));
+    ctx.fillStyle=bodyGrad;
+    ctx.beginPath(); ctx.arc(g.x,g.y,g.radius,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(8,10,14,0.5)'; ctx.lineWidth=1.5; ctx.stroke();
+  }
+  heroRafId = requestAnimationFrame(drawHeroFrame);
+}
+function startHeroDemo(){ if(heroRafId===null) drawHeroFrame(); }
+function stopHeroDemo(){ if(heroRafId!==null){ cancelAnimationFrame(heroRafId); heroRafId=null; } }
+
+/* =====================================================================
+   PAGE SWITCHER — landing (click-to-enter) <-> dashboard
+===================================================================== */
+const landingPage = document.getElementById('landingPage');
+const dashboardPage = document.getElementById('dashboardPage');
+const heroClick = document.getElementById('heroClick');
+let dashboardStarted = false;
+
+function replayDashboardEntrance(){
+  dashboardPage.querySelectorAll('.panel').forEach((p,idx)=>{
+    p.style.animation='none';
+    void p.offsetWidth; // force reflow so the animation restarts
+    p.style.animation='';
+    p.style.animationDelay=(idx*0.07)+'s';
+  });
+  dashboardPage.style.animation='none';
+  void dashboardPage.offsetWidth;
+  dashboardPage.style.animation='';
+}
+
+function enterDashboard(){
+  if(document.body.classList.contains('entering')) return;
+  document.body.classList.add('entering');
+  setTimeout(()=>{
+    document.body.classList.remove('entering');
+    stopHeroDemo();
+    landingPage.classList.remove('active');
+    dashboardPage.classList.add('active');
+    replayDashboardEntrance();
+    if(!state.events.length) addEvent('Dashboard opened. Click pack cells to manage comparison traces.');
+    render();
+    if(!dashboardStarted){ dashboardStarted = true; setInterval(tick, TICK_MS); }
+  }, 620);
+}
+
+function goToLanding(){
+  dashboardPage.classList.remove('active');
+  landingPage.classList.add('active');
+  startHeroDemo();
+}
+
+heroClick.addEventListener('click', enterDashboard);
+heroClick.addEventListener('keydown', (e)=>{
+  if(e.key==='Enter' || e.key===' '){ e.preventDefault(); enterDashboard(); }
+});
+document.getElementById('backBtn').addEventListener('click', goToLanding);
+
+window.addEventListener('resize', ()=>{
+  if(dashboardPage.classList.contains('active')) render();
+});
+
+startHeroDemo();
+
+})();
+</script>
+</body>
+</html>
